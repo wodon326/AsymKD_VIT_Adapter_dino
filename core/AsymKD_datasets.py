@@ -15,7 +15,6 @@ from pathlib import Path
 from glob import glob
 import os.path as osp
 from AsymKD.util.transform import Resize, NormalizeImage, PrepareForNet
-from segment_anything import sam_model_registry, SamPredictor
 from torchvision.transforms import Compose
 import cv2
 
@@ -25,7 +24,7 @@ import torch.nn as nn
 
 
 class StereoDataset(data.Dataset):
-    def __init__(self, seg_any_predictor:SamPredictor, aug_params=None, sparse=False, reader=None):
+    def __init__(self, aug_params=None, sparse=False, reader=None):
         self.augmentor = None
         self.sparse = sparse
         self.img_pad = aug_params.pop("img_pad", None) if aug_params is not None else None
@@ -74,7 +73,6 @@ class StereoDataset(data.Dataset):
         self.image_list = []
         self.extra_info = []
         
-        self.segment_anything_predictor = seg_any_predictor
         self.DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
         
 
@@ -130,26 +128,20 @@ class StereoDataset(data.Dataset):
 
 
             if self.augmentor is not None:
-                depth_image, seg_image = None,None
+                depth_image = None
             else:
-                depth_image, seg_image = img1,img1
-
-            # if self.augmentor is not None:
-            #     depth_image, seg_image, flow, valid = self.augmentor(img1, img1, flow, valid)
+                depth_image = img1
 
             if self.augmentor is not None:
                 if self.sparse:
-                    depth_image, seg_image, flow, valid = self.augmentor(img1, img1, flow, valid)
+                    depth_image, _, flow, valid = self.augmentor(img1, img1, flow, valid)
                 else:
-                    depth_image, seg_image, flow = self.augmentor(img1, img1, flow)
+                    depth_image, _, flow = self.augmentor(img1, img1, flow)
 
             disp = np.array(disp).astype(np.float32)
             depth_image = cv2.cvtColor(depth_image, cv2.COLOR_BGR2RGB) / 255.0
             depth_image = self.transform({'image': depth_image})['image']
             depth_image = torch.from_numpy(depth_image).to(self.DEVICE)
-            seg_image = cv2.cvtColor(seg_image, cv2.COLOR_BGR2RGB)
-            seg_image = self.segment_anything_predictor.set_image(seg_image)
-            seg_image = seg_image.squeeze(0).to(self.DEVICE)
             
 
             flow = torch.from_numpy(flow).permute(2, 0, 1).float()
@@ -162,8 +154,8 @@ class StereoDataset(data.Dataset):
             
             flow = flow[:1].to(self.DEVICE)
             
-            
-            return depth_image, seg_image, flow, valid.float()
+            # print(f'depth_image {depth_image.shape},flow {flow.shape},valid {valid.shape}')
+            return depth_image, flow, valid.float()
         except Exception as e:
             filename = 'Exception_catch.txt'
             a = open(filename, 'a')
@@ -290,9 +282,9 @@ class FallingThings(StereoDataset):
             self.image_list += [ [img1, img2] ]
             self.disparity_list += [ disp ]
 
-class TartanAir(StereoDataset): #../../datasets
-    def __init__(self, seg_any_predictor:SamPredictor, aug_params=None, root='../../datasets', keywords=[]):
-        super().__init__(seg_any_predictor, aug_params, sparse=True, reader=frame_utils.readDispTartanAir)
+class TartanAir(StereoDataset): #../../data/AsymKD
+    def __init__(self, aug_params=None, root='../../data/AsymKD', keywords=[]):
+        super().__init__(aug_params, sparse=True, reader=frame_utils.readDispTartanAir)
         assert os.path.exists(root)
         
         root = osp.join(root, 'TartanAir')
@@ -314,8 +306,8 @@ class TartanAir(StereoDataset): #../../datasets
                 quit()
 
 class KITTI(StereoDataset):
-    def __init__(self, seg_any_predictor:SamPredictor, aug_params=None, root='../../datasets/kitti/kitti2015', image_set='training'):
-        super(KITTI, self).__init__(seg_any_predictor, aug_params, sparse=True, reader=frame_utils.readDispKITTI)
+    def __init__(self,  aug_params=None, root='../../data/AsymKD/kitti/kitti2015', image_set='training'):
+        super(KITTI, self).__init__( aug_params, sparse=True, reader=frame_utils.readDispKITTI)
         assert os.path.exists(root)
 
         image1_list = sorted(glob(os.path.join(root, image_set, 'image_2/*_10.png')))
@@ -336,8 +328,8 @@ class KITTI(StereoDataset):
                 quit()
 
 class KITTI2012(StereoDataset):
-    def __init__(self, seg_any_predictor:SamPredictor, aug_params=None, root='../../datasets/kitti/kitti2012', image_set='training'):
-        super(KITTI2012, self).__init__(seg_any_predictor, aug_params, sparse=True, reader=frame_utils.readDispKITTI2012)
+    def __init__(self,  aug_params=None, root='../../data/AsymKD/kitti/kitti2012', image_set='training'):
+        super(KITTI2012, self).__init__( aug_params, sparse=True, reader=frame_utils.readDispKITTI2012)
         assert os.path.exists(root)
 
         image_list = sorted(glob(os.path.join(root, image_set, 'colored_0/*_10.png')))
@@ -351,8 +343,8 @@ class KITTI2012(StereoDataset):
                 quit()
 
 class MegaDepth(StereoDataset):
-    def __init__(self, seg_any_predictor:SamPredictor, aug_params=None, root='../../datasets/MegaDepth'):
-        super().__init__(seg_any_predictor, aug_params, sparse=True, reader=frame_utils.readDispMegaDepth)
+    def __init__(self,  aug_params=None, root='../../data/AsymKD/MegaDepth'):
+        super().__init__( aug_params, sparse=True, reader=frame_utils.readDispMegaDepth)
         assert os.path.exists(root)
 
         images = sorted( glob(osp.join(root, '*/*/imgs/*.jpg')) )
@@ -366,8 +358,8 @@ class MegaDepth(StereoDataset):
                 quit()
 
 class HRWSI(StereoDataset):
-    def __init__(self, seg_any_predictor:SamPredictor, aug_params=None, root='../../datasets/HRWSI'):
-        super().__init__(seg_any_predictor, aug_params, sparse=True, reader=frame_utils.readDispHRWSI)
+    def __init__(self,  aug_params=None, root='../../data/AsymKD/HRWSI'):
+        super().__init__( aug_params, sparse=True, reader=frame_utils.readDispHRWSI)
         assert os.path.exists(root)
 
         images = sorted( glob(osp.join(root, 'train','imgs/*.jpg')) )
@@ -381,8 +373,8 @@ class HRWSI(StereoDataset):
                 quit()
 
 class BlendedMVS(StereoDataset):
-    def __init__(self, seg_any_predictor:SamPredictor, aug_params=None, root='../../datasets/BlendedMVS'):
-        super().__init__(seg_any_predictor, aug_params, sparse=True, reader=frame_utils.readDispBlendedMVS)
+    def __init__(self,  aug_params=None, root='../../data/AsymKD/BlendedMVS'):
+        super().__init__( aug_params, sparse=True, reader=frame_utils.readDispBlendedMVS)
         assert os.path.exists(root)
 
         images = sorted( glob(osp.join(root, '*/blended_images/*_masked.jpg')) )
@@ -425,14 +417,13 @@ def collate_fn(batch):
         return torch.tensor([]), torch.tensor([])
     
     # 데이터와 레이블을 분리하여 처리
-    depth_image, seg_image, flow, valid = zip(*batch)
+    depth_image, flow, valid = zip(*batch)
     depth_image = torch.stack(depth_image) 
-    seg_image = torch.stack(seg_image) 
     flow = torch.stack(flow) 
     valid = torch.stack(valid) 
-    return depth_image,seg_image,flow,valid
+    return depth_image,flow,valid
   
-def fetch_dataloader(args, seg_any_predictor:SamPredictor, rank, world_size):
+def fetch_dataloader(args,  rank, world_size):
     """ Create the data loader for the corresponding trainign set """
     aug_params = None
     aug_params = {'crop_size': args.image_size, 'min_scale': args.spatial_scale[0], 'max_scale': args.spatial_scale[1], 'do_flip': False, 'yjitter': not args.noyjitter}
@@ -455,16 +446,16 @@ def fetch_dataloader(args, seg_any_predictor:SamPredictor, rank, world_size):
             new_dataset = (clean_dataset*4) + (final_dataset*4)
             logging.info(f"Adding {len(new_dataset)} samples from SceneFlow")
         elif dataset_name == 'HRWSI':
-            new_dataset = HRWSI(seg_any_predictor, aug_params)
+            new_dataset = HRWSI( aug_params)
             logging.info(f"Adding {len(new_dataset)} samples from HRWSI")
         elif dataset_name == 'MegaDepth':
-            new_dataset = MegaDepth(seg_any_predictor, aug_params)
+            new_dataset = MegaDepth( aug_params)
             logging.info(f"Adding {len(new_dataset)} samples from MegaDepth")
         elif dataset_name == 'BlendedMVS':
-            new_dataset = BlendedMVS(seg_any_predictor, aug_params)
+            new_dataset = BlendedMVS( aug_params)
             logging.info(f"Adding {len(new_dataset)} samples from BlendedMVS")
         elif dataset_name == 'kitti':
-            new_dataset = KITTI2012(seg_any_predictor, aug_params)
+            new_dataset = KITTI2012( aug_params)
             logging.info(f"Adding {len(new_dataset)} samples from KITTI")
         elif dataset_name == 'sintel_stereo':
             new_dataset = SintelStereo(aug_params)*140
@@ -473,7 +464,7 @@ def fetch_dataloader(args, seg_any_predictor:SamPredictor, rank, world_size):
             new_dataset = FallingThings(aug_params)*5
             logging.info(f"Adding {len(new_dataset)} samples from FallingThings")
         elif dataset_name.startswith('tartan_air'):
-            new_dataset = TartanAir(seg_any_predictor, aug_params, keywords=dataset_name.split('_')[2:])
+            new_dataset = TartanAir( aug_params, keywords=dataset_name.split('_')[2:])
             logging.info(f"Adding {len(new_dataset)} samples from Tartain Air")
         train_dataset = new_dataset if train_dataset is None else train_dataset + new_dataset
         new_dataset.check_item()
